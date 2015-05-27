@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"log"
 	"net/http"
 	"os"
@@ -19,8 +20,10 @@ import (
 var path = flag.String("path", "", "path of the file to monitor")
 var match = flag.String("match", "PHP message", "send alert if file matches that string")
 var httpserver = flag.Bool("httpserver", false, "Http server which serves the error log on http port 8080")
-
+var apikey = flag.String("apikey", "Slack API Key", "https://hooks.slack.com/services/YOUR-SLACK-TOKEN-HERE")
+var channel = flag.String("channel", "#development", "Default channel where to post log messages")
 var lastPos = 0
+var hash uint32
 
 func reader(path string) []string {
 	file, err := os.Open(path)
@@ -80,7 +83,14 @@ func errorCheck() {
 	}
 	for i := nl; i >= lastPos; i-- {
 		if strings.Contains(lines[i], *match) {
-			slackLine(lines[i])
+			/* Compute a hash of last error and compare it to previous one */
+			h := crc32.NewIEEE()
+			h.Write([]byte(lines[i]))
+			newHash := h.Sum32()
+			if newHash != hash {
+				slackLine(lines[i])
+			}
+			hash = newHash
 			break
 		}
 	}
@@ -94,8 +104,9 @@ func slackLine(line string) error {
 		Username string `json:"username"`
 		Channel  string `json:"channel"`
 	}
-	m := Message{line, "Error Log Scanner", "#development"}
-	url := "https://hooks.slack.com/services/YOUR-SLACK-TOKEN-HERE"
+	m := Message{line, "Error Log Scanner", *channel}
+	url := "https://hooks.slack.com/services/" + *apikey
+
 	j, _ := json.Marshal(m)
 	b := bytes.NewReader(j)
 	_, err := http.Post(url, "application/json", b)
